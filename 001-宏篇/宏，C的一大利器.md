@@ -171,4 +171,56 @@ main( int argc, char * argv[])
 ```
 显而易见的，在第一次`#undef CONST_INT_A`后，编译器将删除`CONST_INT_A`与`10`之间的对应，但其后紧接着，第二次定义了`COSNT_INT_A`为`20`，因此第二次展开`CONST_INT_A/2`时不再是`10/2`，而是`20/2`，因此两次输出分别为`5`和`10`。
 
+## 课外小技巧——使用文本替换宏替代结构体声明
+这是一种可能存在争议性的写法，但是不得不说，这种写法是比较巧妙的。
+```c
+#include <stdlib.h>
+#include <stdio.h>
+#define virtual_A \
+	struct {\
+		int _1;\
+		int _2;\
+	}
+
+virtual_A * A_add( virtual_A* a, virtual_A* b){
+	virtual_A* res = (virtual_A*)malloc(sizeof(virtual_A));
+	res->_1 = a->_1 + b->_1;
+	res->_2 = a->_2 + b->_2;
+}
+
+static struct {	
+	virtual_A *(*add)(virtual_A* , virtual_A*); 
+} A_method = {.add=A_add};
+
+int 
+main( int argc, char * argv[])
+{
+	virtual_A a = {1,2};
+	virtual_A b = {2,3};
+	virtual_A * c = A_method.add(&a,&b);
+	printf("%d\t\t%d\n",c->_1,c->_2);
+	exit(0);
+}
+```
+我们使用了替换宏而不直接定义结构体类型，这使得我们在进行继承时，可以使用类似与oop的方法：
+```c
+struct b{
+    virtual_A;
+    int _3;
+};
+```
+这会直接在内部展开为：
+```c
+struct b{
+	struct {
+		int _1;
+		int _2;
+	};
+    int _3;
+};
+```
+显然，作为匿名成员，显然所有类`b`的实现都可以使用`b._1`来直接访问其所继承的类`virtual_A`。
+
 # #if——使用宏对代码进行分支
+计算机的本质就是一堆布尔逻辑，因此宏也不例外，现在我们来看看如何在预编译中使用宏来提升程序执行速度。
+
