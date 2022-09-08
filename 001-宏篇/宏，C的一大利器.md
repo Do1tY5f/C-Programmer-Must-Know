@@ -1,4 +1,4 @@
-# #define——一切的起源
+# `#define`——一切的起源
 脱离了`define`的C代码是丑陋的。`define`对于成熟的C程序员来说，如同鱼之水，雁之风。
 
 `define`以及`#`、`##`被称为替换文本宏（Replacing text macros），将在程序编译过程中的预处理阶段[展开](#展开)。
@@ -221,6 +221,130 @@ struct b{
 ```
 显然，作为匿名成员，显然所有类`b`的实现都可以使用`b._1`来直接访问其所继承的类`virtual_A`。
 
-# #if——使用宏对代码进行分支
+# 使用宏对代码进行分支——`#if`
 计算机的本质就是一堆布尔逻辑，因此宏也不例外，现在我们来看看如何在预编译中使用宏来提升程序执行速度。
+
+## 基本的逻辑处理
+```c
+#if expression
+// code
+#elif expression
+// code
+#else
+// code
+#endif
+```
+如上所示，其中的`expression`应当是一个在预编译阶段就可以确定布尔值的表达式，例如：`0`、`2>1`等等，其中最特殊的应该是`defined(identifier)`表达，如果`identifier`在之前被定义过且没有被取消定义，则表达式`defined(identifier)`结果为`true`。
+
+例如下面的程序：
+```c
+#include <stdio.h>
+#include <stdlib.h>
+
+#define A
+
+#if defined(A)
+    #define B 0
+#endif
+
+#undef A
+
+#if defined(A)
+    #define C 2
+#else
+    #define C 3
+#endif
+
+int
+main( int argc, char * argv[])
+{
+    int b = B;
+    int c = C;
+    printf("%d,%d\n", b,c);
+    exit(0);
+}
+```
+编译后输出可以得到`0,3`。这说明，在预编译阶段`B`被定义为`0`，`C`被定义为`3`。
+
+## 在预编译时对函数实现进行分支
+我们可以通过一个具体的例子来观察我们是如何在预编译阶段对函数实现进行分支的：
+```c
+/**
+ *@file: a.h
+ *@author:Do1tY5f
+ */
+#define __USING_INT32 1
+```
+```c
+/**
+ *@file: a.c
+ *@author:Do1tY5f
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <limits.h>
+#include "a.h"
+int 
+main(int argc, char* argv[])
+{
+#if __USING_INT32
+    int a = INT_MAX;
+#else
+    short a = SHRT_MAX;
+#endif
+    printf("The largest number supported is: %d\n",a);
+    exit(0);
+}
+```
+此时我们先对其编译运行一次，可以得到输出：
+```shell
+The largest number supported is: 2147483647
+```
+再将`#define __USING_INT32 1`修改为`#define __USING_INT32 0`，再次进行编译运行，可以得到：
+```shell
+The largest number supported is: 32767
+```
+让我们来考虑这样一种情况，当我们要完成一个可能运行在不同设备上的任务调度程序时，设备可能是单核的，也可能是多核的，这意味着，任务可能并行也可能并发，这将会是两种不同的调度策略，但我们规定了只提供一个接口`void task_schedualer(pid * )`，那么我们就可以使用如下的方案来完成这个程序：
+```c
+void
+task_schedualer(pid * process_id)
+{
+#if USING_MULTI_KERNEL
+    //多核调度策略的实现
+#else
+    //单核调度策略的实现
+#endif
+}
+```
+显然，只要我们在头文件中定义了`USING_MULTI_KERNEL`为`1`则将在预编译阶段去掉单核调度策略的实现，如定义`USIGN_NULTI_KERNEL`为`0`，则将去掉多核调度策略的实现。
+
+有时，我们希望某些函数不会参与编译，但是又不希望将其删除或注释掉，我们也可以使用`#if`使其在预编译阶段被处理掉，只需要在其首尾分别加上`#if 0`和`#endif`即可。
+
+## `#if defined()`的替代——`#ifdef`与`#ifndef`
+在大多时刻，我们希望用更少的代码量表达更多的意思，于是`#ifdef`出现了，其所表达的意思和`#if defined()`完全一致，因此我们可以直接作以替换。
+
+有这样一种情况：当我们在编写一个头文件时，为了避免重复引用，会特别定义一个宏变量来防止这种情况发生。这样我们只需要确定这个宏变量是否被定义，即可防止重复引用的出现。根据上面对`#if defined()`的描述，我们可以如下方法：
+```c
+#if defined(__SPECIAL_H__)
+#else
+#define __SPECIAL_H__
+// header file content
+#endif
+```
+然而，实际上，我们知道`#if`后面的部分被定义为逻辑表达式，因此可以加上`!`表示`bool`取反。因此我们可以将上面的实现更简单的写成下面的表达：
+```c
+#if !defined(__SPECIAL_H__)
+#define __SPECIAL_H__
+// header file content
+#endif
+```
+然而，实际上，除了`#ifdef`外，C标准还提供了`#ifndef`来表示`#if !defined()`的情况，于是我们又可以将上面的代码简写成：
+```c
+#ifndef __SPECIAL_H__
+#define __SPECIAL_H__
+// header file content
+#endif
+```
+    小贴士：
+    实际上，在C23的标准中新加入了`#elifdef`以及`#elifndef`两个新的*条件包括* 预处理，从其命名就可以看出实际上是`#elif defined()`和`#elif !defined()`的替代，因此不再作过多的介绍。
 
