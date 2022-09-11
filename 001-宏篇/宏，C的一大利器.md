@@ -1,7 +1,7 @@
 # `#define`——一切的起源
-脱离了`define`的C代码是丑陋的。`define`对于成熟的C程序员来说，如同鱼之水，雁之风。
+脱离了`#define`的C代码是丑陋的。`#define`对于成熟的C程序员来说，如同鱼之水，雁之风。
 
-`define`以及`#`、`##`被称为替换文本宏（Replacing text macros），将在程序编译过程中的预处理阶段[展开](#展开)。
+`#define`以及`#`、`##`被称为替换文本宏（Replacing text macros），将在程序编译过程中的预处理阶段[展开](#展开)。
 
 ## 基本的替换
 ```c
@@ -221,7 +221,7 @@ struct b{
 ```
 显然，作为匿名成员，显然所有类`b`的实现都可以使用`b._1`来直接访问其所继承的类`virtual_A`。
 
-# 使用宏对代码进行分支——`#if`
+# `#if`——使用宏对代码进行分支
 计算机的本质就是一堆布尔逻辑，因此宏也不例外，现在我们来看看如何在预编译中使用宏来提升程序执行速度。
 
 ## 基本的逻辑处理
@@ -348,3 +348,61 @@ task_schedualer(pid * process_id)
     小贴士：
     实际上，在C23的标准中新加入了`#elifdef`以及`#elifndef`两个新的*条件包括* 预处理，从其命名就可以看出实际上是`#elif defined()`和`#elif !defined()`的替代，因此不再作过多的介绍。
 
+## 工程实践——`#if`的实际使用
+
+实际上大部分情况下，我们都会使用`#ifdef`和`#ifndef`，但会有一些特殊情形，使用`#if`更加合适。
+
+在完成项目时，我们希望每次debug后可以保留原来的函数方法，而注释本身应该是对代码块的解释，不应该将代码块也注释掉，这会影响代码的可阅读性，因此会采用`#if 0 ... #endif`的写法来保证编译器在预处理阶段将这段代码去掉。例如：
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+
+#define PRINT_STR_ONCE      1
+#define PRINT_STR_TWICE     2
+#define CALL_BACK_MAX       2
+
+typedef struct{
+    int cmd;
+    void(*call_back_func)(const char *);
+}CALLBACK_STRUCT;
+
+void 
+print_1( const char * str)
+{
+    printf("%s\n",str);
+}
+void 
+print_2(const char * str)
+{
+#if 0
+    for (int i = 2; i > 0; i--) {
+        printf("%s\n",str);
+    }
+#endif
+    printf("%s\n",str);
+    printf("%s\n",str);
+}
+
+static CALLBACK_STRUCT call_bk_set[2] = {
+    {.cmd = PRINT_STR_ONCE, .call_back_func = print_1},
+    {.cmd = PRINT_STR_TWICE, .call_back_func = print_2},
+};
+
+void 
+call_back(int cmd, const char * str)
+{
+    for (int i = 0; i < CALL_BACK_MAX; i++) {
+        if(cmd==call_bk_set[i].cmd){
+            call_bk_set[i].call_back_func(str);
+        }
+    }
+}
+
+int
+main(int argc, char * argv[])
+{
+    call_back(atoi(argv[1]), argv[2]);
+    exit(0);
+}
+```
