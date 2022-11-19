@@ -406,7 +406,6 @@ main(int argc, char * argv[])
     goto *(array[input]);
 L_1:
     puts("your didn't input");
-    puts("your didn't input");
     goto *(array[3]);
 L_2:
     puts("your input: 1");
@@ -531,14 +530,201 @@ main()
 ```
 由于我使用的是Linux系统，所以在实现屏幕清空时使用了`clear`，如果使用windows请自行更改为`cls`。
 
+当然，这并不是最优解，当在为[共享库](#什么是共享库)编写代码时时，减少动态重定位的次数是很必要的，我们可以将数据处理为`const`类型。
+```c
+#include <stdio.h>
+#include <stdlib.h>
+int
+main(int argc, char * argv[])
+{
+    static const int array[] = {&&L_1 - &&L_1, &&L_2 - &&L_1, &&L_3 - &&L_1, &&L_4 - &&L_1};
+    int input = 0;
+    if(argc == 2)
+        input = atoi(argv[1]);
+    goto *(&&L_1+array[input]);
+L_1:
+    puts("your didn't input");
+    goto *(&&L_1+array[3]);
+L_2:
+    puts("your input: 1");
+    goto *(&&L_1+array[3]);
+L_3:
+    puts("your input: 2");
+L_4:
+    return 0;
+}
+```
+但是，AVR并不支持这种方法，因此在为AVR编写程序时，我们只能用之前的方式建立一个`void *`类型的数组。
 
+如果包含标签的函数是内联的或者克隆的，对于相同标签的`&&foo`表达式可能有不同的值。如果一个程序依赖于所有`&&foo`的值相同，那么就应该使用`__attribute__((__noinline__,__noclone__))`来保护内联和克隆，如果一个`static`的变量的初始化被赋值为`&&foo`，那么内联和克隆将会被禁止。
 
+## 嵌套函数
+嵌套函数是指在一个函数中定义的另一个函数。请注意，嵌套函数作为标准C的扩展被GNU C支持，其并不是标准C的内容，另外，GNU C++也不支持嵌套函数。
+
+嵌套函数的函数名只在定义它的块中可见。譬如，我们定义一个名为`square`的嵌套函数，并将其调用两次。
+```c
+#include <stdio.h>
+#include <stdlib.h>
+double
+foo(double a, double b)
+{
+    double square(double z){return z * z;}
+    return square(a) + square(b);
+}
+
+int
+main(int argc, char * argv[])
+{
+    double res = foo(2.2, 3.3);
+    printf("%.1f^2 + %.1f^2 = %.2f", 2.2, 3.3, res);
+    exit(0);
+}
+```
+嵌套函数可以访问包含它的函数的所有在它定义点之前声明的变量，这被称为`lexical scope`（语法域），例如:
+```c
+#include <stdio.h>
+#include <stdlib.h>
+int
+main(int argc, char * argv[])
+{
+    int i = 1;
+    void foo(){i++;}
+    printf("i = %d\n",({foo();i;}));
+    exit(0);
+}
+```
+可以得到，在调用`foo()`函数后，`i`的值由`1`变为了`2`。
+
+这种嵌套函数是可以定义在函数内任何允许变量定义的地方，也就是说，在一个块中可以与其他声明和语句混合使用。
+
+通过将函数地址传递给其他函数或者将地址存储下来，是可以实现在外部调用这个嵌套函数的。
+例如：
+```c
+#include <stdio.h>
+#include <stdlib.h>
+typedef void (*hook)(void);
+hook bar_func;
+void 
+foo(hook func)
+{
+    bar_func = func;
+    func();
+}
+int
+main(int argc, char * argv[])
+{
+    static int i = 1;
+    void bar(){i++;}
+    foo(bar);
+    bar_func();
+    printf("i = %d\n", i);
+    exit(0);
+}
+```
+最终可以得到结果`i = 3`。如果你的内嵌函数中使用了继承自包含它的函数的局部变量，那你应该尽量避免在包含他的函数结束调用后，在外部调用这个内嵌函数，因为局部变量的生命周期已经结束了，除非像上面的代码一样，使用了`static`变量，使其具有更长的生命周期。否则，极有可能修改并不属于它的数值。
+
+GCC使用一种称为[`trampolines`](#trampolines)的技术获取内嵌函数的地址。嵌套函数可以跳转到继承自包含它的函数的标签处，只要标签在包含函数内是显式声明的。
+```c
+#include <stdio.h>
+#include <stdlib.h>
+typedef struct node node;
+struct node{
+    int     value;
+    node *  next;
+};
+
+struct node * 
+foo(int * array, int sz)
+{
+    __label__ end;
+    struct node * head = NULL;
+    int bar(){
+        struct node * temp = NULL;
+        if(sz == 0)
+            goto end;
+        temp = (struct node *)malloc(sizeof(struct node));
+        head = temp;
+        for(int i = 0; i < sz-1; i++){
+            temp->value = array[i];
+            temp->next = (struct node *)malloc(sizeof(struct node));
+            temp = temp->next;
+            temp->next = NULL;
+        }
+        temp->value = array[sz-1];
+        temp->next = NULL;
+    }
+    bar();
+end:
+    return head;
+}
+
+void 
+print(struct node * head)
+{
+    for(;head != NULL;head = head->next){
+        printf("%d",head->value);
+    }
+    puts("");
+}
+
+int
+main(int argc, char * argv[])
+{
+    int arr[5] = {1,0,0,8,6};
+    struct node * head = foo(arr, 5);
+    print(head);
+    exit(0);
+}
+```
+最终输出结果为：`10086`，可以看到，在执行内嵌函数`bar()`时，我们使用了`goto`语句，当`foo()`函数的第二个参数为`0`时，将会直接跳转到`end`，并返回`head`值为`NULL`。
+
+嵌套函数是没有[链接属性](#链接属性)的，因此使用`extern`或者`static`进行声明是错误的。如果你需要在定义嵌套函数之前进行声明，那么你只能使用`auto`作为存储类修饰符。例如
+```c
+#include <stdio.h>
+#include <stdlib.h>
+int 
+main()
+{
+    void foo();
+    int i = 1;
+    void foo(){i++;printf("i = %d\n",i);}
+    foo();
+    exit(0);
+}
+```
+如果你要编译上面这段代码，你将会得到报错：
+```shell
+8:10: error: static declaration of ‘foo’ follows non-static declaration
+    8 |     void foo(){i++;printf("i = %d\n",i);}
+      |          ^~~
+6:10: note: previous declaration of ‘foo’ was here
+    6 |     void foo();
+      |       
+```
+但当你在嵌套函数`foo()`的声明前加上存储类修饰符`auto`，就可以解决这个问题。
+```c
+#include <stdio.h>
+#include <stdlib.h>
+int 
+main()
+{
+    auto void foo();
+    int i = 1;
+    void foo(){i++;printf("i = %d\n",i);}
+    foo();
+    exit(0);
+}
+```
+最终输出为`i = 2`。
+
+## 注释
 ---
 #### 什么是栈帧？
 C语言的函数调用机制使用了栈结构提供的Last In First Out策略，每一个栈帧对应了一个尚未运行完的函数。函数的栈帧中保存了该函数的返回地址和局部变量，其中`rbp`寄存器指向当前栈帧的栈底，`rsp`寄存器指向函数栈的栈顶。
 
 一个函数被调用后，首先要将调用它的函数的栈帧的栈底压入栈中作以保存，再将`rsp`寄存器所指向的内存位置作为当前函数的栈帧的栈底，如果在当前函数中还会调用，则会提前对`rsp`中存储的地址进行偏移，在堆栈中预留出保存局部变量的空间，更多的细节我们会在后面讨论。
 
+---
 #### 什么是共享库？
 共享库又叫动态函数库，其中的函数在可执行程序启动时被加载，如果一个共享库被正常安装，那么所有的程序在重新运行时都可以自动加载最新的函数库中的函数。
 
@@ -547,3 +733,26 @@ C语言的函数调用机制使用了栈结构提供的Last In First Out策略�
 每个共享函数库都有一个`so name`文件和一个`real name`文件，其中`real name`包含真正库函数代码的文件，而`so name`则是一个链接文件，链接到最新的库代码文件上。
 
     函数库是由系统建立的有一定功能的函数的集合，库中存放函数名称、对应的目标代码以及连接过程所需要的重定位信息。用户也可以根据自己的需要建立用户函数库。
+
+---
+#### Trampolines
+获取嵌套函数的地址需要特殊的编译器处理，以确保在通过间接调用调用函数时加载静态链寄存器。GCC支持嵌套函数，方法是在获取嵌套函数的地址时在运行时创建可执行`Trampolines`。这是一小段代码，通常位于堆栈上，位于包含函数的堆栈框架中。`Trampolines`加载静态链寄存器，然后跳转到嵌套函数的真实地址。
+
+使用`Trampolines`需要一个可执行堆栈，这是一个安全风险。为了避免这个问题，GCC还支持另一种策略:为嵌套函数使用描述符。在此模型下，获取嵌套函数的地址将导致指向不可执行函数描述符对象的指针。从描述符初始化静态链是在间接调用站点上处理的。
+
+---
+#### 什么是链接属性？
+多个源文件链接在一起时，我们需要处理可能出现的标识符同名现象，这时就要用到链接属性来作以区分。链接属性通常使用存储类说明符`auto`、`register`、`extern`、`static`来确定。因为`register`是一个历史残留问题，我们在这里不介绍它。
+
+链接属性分为三种：外部（external）、内部（internal）、无（none），分别对应`extern `、`static`、`auto`。
+- 外部链接：
+    - 能从其所在的作用域指代该标识符。
+    - 所有非 static 函数、所有 extern 对象（除非之前声明为 static ）和所有文件作用域的非 static 对象拥有此链接。
+    - 若不提供存储类说明符，则默认所有函数为外部链接（`extern`）、文件作用域的对象为外部链接（`extern`）。
+    - 在变量声明前加上`extern`表示引用全局变量。
+- 内部链接：
+    - 能从当前翻译单元的所有作用域指代该标识符，所有`static`文件作用域（！需要注意是文件作用域）标识符拥有此链接。
+    - 对于声明于代码块外的变量和函数，只有在声明时添加`static`修饰符才具有内部链接属性。
+- 无链接：
+    - 只能从其所在的作用域指代该标识符。
+    - 若不提供存储类说明符，则默认对块作用域的对象无链接（`auto`）
